@@ -2,6 +2,8 @@ import os
 import asyncio
 import logging
 import traceback
+from datetime import datetime, timezone
+
 from flask import Flask, request, abort, jsonify
 from linebot.v3.messaging import MessagingApi, Configuration, ApiClient, PushMessageRequest, TextMessage, ReplyMessageRequest, FlexMessage, FlexBubble, FlexBox, FlexText, FlexButton, MessageAction, URIAction, FlexImage, FlexSeparator
 from linebot.v3.webhook import WebhookHandler
@@ -9,13 +11,13 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
 from linebot.v3.exceptions import InvalidSignatureError
 import random
 
+import firebase_admin
+from firebase_admin import credentials, firestore
+
 # 設定
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-
-# 檔案路徑設定
-USER_FILE = os.path.join(os.getcwd(), "user_ids.txt")
 
 # 初始化
 app = Flask(__name__)
@@ -23,29 +25,60 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+try:
+    # 從環境變數獲取 Firebase 憑證
+    firebase_credentials = os.environ.get('FIREBASE_CREDENTIALS')
+
+    if firebase_credentials:
+        import json
+
+        cred_dict = json.loads(firebase_credentials)
+        cred = credentials.Certificate(cred_dict)
+    else:
+        raise ValueError("找不到 FIREBASE_CREDENTIALS 環境變數")
+
+    firebase_admin.initialize_app(cred)
+    db = firestore.client()
+    logger.info("Firebase Admin SDK 初始化成功")
+except Exception as e:
+    logger.error(f"Firebase Admin SDK 初始化失敗: {e}")
+    db = None
 
 class UserManager:
     @staticmethod
     def record_user_id(user_id):
-        existing_ids = UserManager._get_existing_ids()
-        if user_id not in existing_ids:
-            with open(USER_FILE, "a") as f:
-                f.write(f"{user_id}\n")
-            logger.info(f"記錄新 user_id: {user_id}")
-        else:
-            logger.info(f"user_id 已存在: {user_id}")
+        try:
+            user_ref = db.collection('Users').document(user_id)
+            user_doc = user_ref.get()
+
+            if not user_doc.exists:
+                # 創建新用戶資料
+                user_data = {
+                    "user_id": user_id,
+                    "created_at": datetime.now(timezone.utc),
+                    "last_active": datetime.now(timezone.utc)
+                }
+                user_ref.set(user_data)
+                logger.info(f"記錄新 user_id: {user_id}")
+            else:
+                # 更新最後活躍時間
+                user_ref.update({
+                    "last_active": datetime.now()
+                })
+                logger.info(f"更新 user_id 活躍時間: {user_id}")
+
+        except Exception as e:
+            logger.error(f"記錄用戶 ID 失敗: {e}")
 
     @staticmethod
     def get_all_user_ids():
-        return list(UserManager._get_existing_ids())
-
-    @staticmethod
-    def _get_existing_ids():
-        if not os.path.exists(USER_FILE):
-            return set()
-        with open(USER_FILE, "r") as f:
-            return set(line.strip() for line in f if line.strip())
-
+        try:
+            users_ref = db.collection('Users')
+            docs = users_ref.stream()
+            return [doc.id for doc in docs]
+        except Exception as e:
+            logger.error(f"獲取用戶 ID 列表失敗: {e}")
+            return []
 
 class MessageService:
     @staticmethod
