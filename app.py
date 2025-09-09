@@ -13,6 +13,14 @@ import random
 
 import firebase_admin
 from firebase_admin import credentials, firestore
+import os
+from dotenv import load_dotenv
+
+if os.path.exists('.env'):
+    load_dotenv()
+    print("✅ 載入本地 .env 配置")
+else:
+    print("🚀 使用生產環境配置")
 
 # 設定
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -24,18 +32,36 @@ app = Flask(__name__)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
 try:
-    # 從環境變數獲取 Firebase 憑證
-    firebase_credentials = os.environ.get('FIREBASE_CREDENTIALS')
-
-    if firebase_credentials:
-        import json
-
-        cred_dict = json.loads(firebase_credentials)
-        cred = credentials.Certificate(cred_dict)
+    # 檢查是否為本地開發環境
+    if os.path.exists('.env'):
+        # 本地開發：直接讀取 JSON 檔案
+        json_files = [f for f in os.listdir('.') if
+                      f.startswith('smartlearninglinebot-firebase-adminsdk') and f.endswith('.json')]
+        if json_files:
+            firebase_key_path = json_files[0]  # 取第一個找到的檔案
+            cred = credentials.Certificate(firebase_key_path)
+            logger.info(f"使用本地 Firebase 憑證檔案: {firebase_key_path}")
+        else:
+            raise ValueError("找不到 Firebase 憑證檔案")
     else:
-        raise ValueError("找不到 FIREBASE_CREDENTIALS 環境變數")
+        # 生產環境：從環境變數讀取
+        firebase_credentials = os.environ.get('FIREBASE_CREDENTIALS')
+        if firebase_credentials:
+            import json
+
+            cred_dict = json.loads(firebase_credentials)
+
+            # 修正私鑰格式
+            if 'private_key' in cred_dict:
+                private_key = cred_dict['private_key']
+                if '\\n' in private_key:
+                    cred_dict['private_key'] = private_key.replace('\\n', '\n')
+
+            cred = credentials.Certificate(cred_dict)
+            logger.info("使用環境變數 Firebase 憑證")
+        else:
+            raise ValueError("找不到 Firebase 憑證")
 
     firebase_admin.initialize_app(cred)
     db = firestore.client()
@@ -43,7 +69,6 @@ try:
 except Exception as e:
     logger.error(f"Firebase Admin SDK 初始化失敗: {e}")
     db = None
-
 class UserManager:
     @staticmethod
     def record_user_id(user_id):
@@ -294,7 +319,7 @@ def handle_follow(event):
 def start_app():
     try:
         # 使用環境變數的 PORT，Render 會自動提供
-        port = int(os.environ.get('PORT', 5000))
+        port = int(os.environ.get('PORT', 7000))
         app.run(host="0.0.0.0", port=port)
     finally:
         try:
