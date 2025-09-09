@@ -88,7 +88,7 @@ class UserManager:
             else:
                 # 更新最後活躍時間
                 user_ref.update({
-                    "last_active": datetime.now()
+                    "last_active": datetime.now(timezone.utc)
                 })
                 logger.info(f"更新 user_id 活躍時間: {user_id}")
 
@@ -264,16 +264,37 @@ def callback():
 
 @app.route("/unity_notify", methods=["POST"])
 def unity_notify():
-    data = request.json
+    try:
+        # 加入日誌記錄收到的請求
+        logger.info(f"收到 Unity 請求，Content-Type: {request.content_type}")
+        logger.info(f"請求數據: {request.get_data(as_text=True)}")
 
-    if 'totalTime' in data:
-        message = LearningReportGenerator.generate_learning_message(data)
-    else:
-        message = data.get("message", "遊戲開始啦！")
+        data = request.json
 
-    result = MessageService.broadcast_message(message)
-    return jsonify(result)
+        # 檢查數據是否正確解析
+        if data is None:
+            logger.error("無法解析 JSON 數據")
+            return jsonify({"status": "error", "message": "Invalid JSON"}), 400
 
+        logger.info(f"解析後的數據: {data}")
+
+        if 'totalTime' in data:
+            message = LearningReportGenerator.generate_learning_message(data)
+        else:
+            message = data.get("message", "遊戲開始啦！")
+
+        logger.info(f"準備發送訊息: {message[:100]}...")  # 只記錄前100字元
+
+        result = MessageService.broadcast_message(message)
+
+        logger.info(f"廣播結果: {result}")
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"unity_notify 處理失敗: {str(e)}")
+        logger.error(f"錯誤詳情: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # 事件處理
 @handler.default()
