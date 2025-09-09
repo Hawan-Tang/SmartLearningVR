@@ -1,9 +1,12 @@
 import os
 import asyncio
 import logging
+import threading
+import time
 import traceback
 from datetime import datetime, timezone
 
+import requests
 from flask import Flask, request, abort, jsonify
 from linebot.v3.messaging import MessagingApi, Configuration, ApiClient, PushMessageRequest, TextMessage, ReplyMessageRequest, FlexMessage, FlexBubble, FlexBox, FlexText, FlexButton, MessageAction, URIAction, FlexImage, FlexSeparator
 from linebot.v3.webhook import WebhookHandler
@@ -337,8 +340,33 @@ def handle_follow(event):
     logger.info(f"用戶加入好友: {user_id}")
 
 
+def keep_alive():
+    """定期向自己發送請求以保持服務活躍"""
+
+    def ping_self():
+        while True:
+            try:
+                # 每 10 分鐘 ping 一次自己的健康檢查端點
+                time.sleep(600)  # 600 秒 = 10 分鐘
+
+                # 獲取當前應用的 URL
+                app_url = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:7000')
+                response = requests.get(f"{app_url}/health", timeout=30)
+                logger.info(f"Keep-alive ping: {response.status_code}")
+
+            except Exception as e:
+                logger.error(f"Keep-alive ping 失敗: {e}")
+
+    # 在背景執行緒中執行
+    ping_thread = threading.Thread(target=ping_self, daemon=True)
+    ping_thread.start()
+    logger.info("Keep-alive 機制已啟動")
+
 def start_app():
     try:
+        # 啟動 keep-alive 機制
+        keep_alive()
+
         # 使用環境變數的 PORT，Render 會自動提供
         port = int(os.environ.get('PORT', 7000))
         app.run(host="0.0.0.0", port=port)
@@ -692,7 +720,8 @@ def health_check():
     return jsonify({
         "status": "ok",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "message": "Service is running"
+        "message": "Service is running",
+        "uptime": "active"
     }), 200
 
 @app.route("/", methods=["GET"])
@@ -738,6 +767,7 @@ def generate_gemini_response(input_text):
     except Exception as e:
         logger.error(f"Gemini API 錯誤: {str(e)}")
         return "繼續保持學習熱忱！"
+
 
 if __name__ == "__main__":
     start_app()
