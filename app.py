@@ -687,6 +687,22 @@ class AIAdviceService:
             return "繼續保持學習熱忱！"
 
 
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({
+        "status": "ok",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "message": "Service is running"
+    }), 200
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "service": "LINE Bot",
+        "status": "running",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }), 200
+
 def generate_gemini_response(input_text):
     """
     使用 Gemini API 獲取回應
