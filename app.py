@@ -344,23 +344,26 @@ def keep_alive():
     """定期向自己發送請求以保持服務活躍"""
 
     def ping_self():
+        # 啟動後立即執行第一次 ping
         while True:
             try:
-                # 每 10 分鐘 ping 一次自己的健康檢查端點
-                time.sleep(600)  # 600 秒 = 10 分鐘
-
-                # 獲取當前應用的 URL
-                app_url = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:7000')
+                # 使用正確的 Render URL
+                app_url = 'https://smartlearningvr.onrender.com'
                 response = requests.get(f"{app_url}/health", timeout=30)
-                logger.info(f"Keep-alive ping: {response.status_code}")
+                logger.info(f"Keep-alive ping 成功: {response.status_code}")
+
+                # 每 8 分鐘 ping 一次（比 15 分鐘限制短）
+                time.sleep(480)  # 8 分鐘
 
             except Exception as e:
                 logger.error(f"Keep-alive ping 失敗: {e}")
+                # 失敗後等 30 秒再重試
+                time.sleep(30)
 
     # 在背景執行緒中執行
     ping_thread = threading.Thread(target=ping_self, daemon=True)
     ping_thread.start()
-    logger.info("Keep-alive 機制已啟動")
+    logger.info("Keep-alive 機制已啟動 - 每 8 分鐘 ping 一次")
 
 def start_app():
     try:
